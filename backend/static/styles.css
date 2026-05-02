@@ -1,0 +1,148 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f4f7fb;
+    color: #1f2937;
+}
+
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px;
+}
+
+.panel {
+    background: #ffffff;
+    border: 1px solid #d8e1ea;
+    border-radius: 14px;
+    padding: 24px;
+    box-shadow: 0 8px 30px rgba(15, 23, 42, 0.06);
+}
+
+h1 {
+    margin: 0 0 8px;
+    font-size: 28px;
+}
+
+.muted {
+    margin: 0 0 20px;
+    color: #6b7280;
+}
+
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+button, .link-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: 1px solid #2563eb;
+    background: #2563eb;
+    color: #fff;
+    text-decoration: none;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+button.secondary {
+    background: #ffffff;
+    color: #2563eb;
+}
+
+.link-button {
+    background: #ffffff;
+    color: #2563eb;
+}
+
+.message, .error {
+    margin: 12px 0;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: #eef4ff;
+    color: #1d4ed8;
+}
+
+.error {
+    background: #fff1f2;
+    color: #be123c;
+}
+
+.cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-top: 18px;
+}
+
+.card {
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 16px;
+    background: #fbfdff;
+}
+
+.label {
+    display: block;
+    margin-bottom: 8px;
+    color: #6b7280;
+    font-size: 13px;
+}
+
+.card strong {
+    font-size: 18px;
+}
+
+.topbar {
+    display: flex;
+    gap: 16px;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.stream-wrap {
+    margin-top: 18px;
+    border: 1px solid #d8e1ea;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #000;
+}
+
+.stream {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.status-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 14px;
+    padding: 12px 0 0;
+    color: #374151;
+}
+
+@media (max-width: 640px) {
+    .container {
+        padding: 12px;
+    }
+
+    .panel {
+        padding: 16px;
+    }
+
+    h1 {
+        font-size: 22px;
+    }
+}

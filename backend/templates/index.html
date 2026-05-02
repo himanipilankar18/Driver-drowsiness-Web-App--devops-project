@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Safety Monitoring System</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <main class="container">
+        <section class="panel">
+            <h1>Driver Safety Monitoring System</h1>
+            <p class="muted">Minimal FastAPI dashboard for live monitoring.</p>
+
+            <div class="actions">
+                <button id="startBtn" type="button">Start Monitoring</button>
+                <button id="stopBtn" type="button" class="secondary">Stop Monitoring</button>
+                <a class="link-button" href="/video">Open Video Feed</a>
+            </div>
+
+            <div id="message" class="message">{{ status.message }}</div>
+            <div id="error" class="error" {% if not status.error %}style="display:none;"{% endif %}>{{ status.error }}</div>
+
+            <div class="cards">
+                <div class="card">
+                    <span class="label">Current State</span>
+                    <strong id="state">{{ status.state }}</strong>
+                </div>
+                <div class="card">
+                    <span class="label">Fatigue Score</span>
+                    <strong id="fatigue_score">{{ status.fatigue_score }}</strong>
+                </div>
+                <div class="card">
+                    <span class="label">Distraction Score</span>
+                    <strong id="distraction_score">{{ status.distraction_score }}</strong>
+                </div>
+                <div class="card">
+                    <span class="label">Face Detected</span>
+                    <strong id="face_detected">{{ status.face_detected }}</strong>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        async function refreshStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+                document.getElementById('state').textContent = data.state;
+                document.getElementById('fatigue_score').textContent = data.fatigue_score.toFixed(2);
+                document.getElementById('distraction_score').textContent = data.distraction_score.toFixed(2);
+                document.getElementById('face_detected').textContent = data.face_detected;
+                document.getElementById('message').textContent = data.message || '';
+
+                const error = document.getElementById('error');
+                if (data.error) {
+                    error.textContent = data.error;
+                    error.style.display = 'block';
+                } else {
+                    error.textContent = '';
+                    error.style.display = 'none';
+                }
+            } catch (error) {
+                document.getElementById('message').textContent = 'Unable to refresh status.';
+            }
+        }
+
+        async function postAction(url) {
+            const response = await fetch(url, { method: 'POST' });
+            const data = await response.json();
+            document.getElementById('message').textContent = data.message || '';
+            await refreshStatus();
+        }
+
+        document.getElementById('startBtn').addEventListener('click', () => postAction('/start'));
+        document.getElementById('stopBtn').addEventListener('click', () => postAction('/stop'));
+
+        refreshStatus();
+        setInterval(refreshStatus, 2000);
+    </script>
+</body>
+</html>
