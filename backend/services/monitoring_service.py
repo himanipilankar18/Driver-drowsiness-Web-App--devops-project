@@ -38,6 +38,7 @@ class MonitoringService:
         self._fusion_engine: Optional[FusionEngine] = None
         self._alert_manager: Optional[AlertManager] = None
         self._hardware: Optional[HardwareInterface] = None
+        self._camera_available = False
 
         self._latest_frame = self._make_placeholder_frame("System idle")
         self._latest_timestamp = 0.0
@@ -77,27 +78,27 @@ class MonitoringService:
             capture.set(cv2.CAP_PROP_FRAME_WIDTH, CONFIG.frame_width)
             capture.set(cv2.CAP_PROP_FRAME_HEIGHT, CONFIG.frame_height)
 
-            if not capture.isOpened():
-                self._error = f"Camera {CONFIG.camera_index} is not available"
-                self._message = "Failed to start monitoring"
+            self._capture = None
+            self._detector = None
+            self._camera_available = False
+            if capture.isOpened():
+                try:
+                    detector = FaceLandmarkDetector(
+                        min_detection_confidence=CONFIG.min_detection_confidence,
+                        min_tracking_confidence=CONFIG.min_tracking_confidence,
+                    )
+                    self._capture = capture
+                    self._detector = detector
+                    self._camera_available = True
+                except Exception as exc:
+                    logger.exception("Face detector init failed, switching to no-camera mode")
+                    capture.release()
+                    self._error = f"Face detector init failed: {exc}"
+            else:
                 capture.release()
-                self._latest_frame = self._make_placeholder_frame(self._error)
-                return False
+                self._message = f"Camera not available (Cloud mode): index {CONFIG.camera_index}"
+                self._latest_frame = self._make_placeholder_frame("Camera not available (Cloud mode)")
 
-            try:
-                detector = FaceLandmarkDetector(
-                    min_detection_confidence=CONFIG.min_detection_confidence,
-                    min_tracking_confidence=CONFIG.min_tracking_confidence,
-                )
-            except Exception as exc:
-                self._error = f"Face detector init failed: {exc}"
-                self._message = "Failed to start monitoring"
-                capture.release()
-                self._latest_frame = self._make_placeholder_frame(self._error)
-                return False
-
-            self._capture = capture
-            self._detector = detector
             self._eye_analyzer = EyeAnalyzer()
             self._head_pose_estimator = HeadPoseEstimator()
             self._distraction_monitor = DistractionMonitor()
@@ -121,7 +122,11 @@ class MonitoringService:
             self._latest_head_pose = None
             self._latest_fatigue = None
             self._latest_distraction = None
-            self._message = "Monitoring started"
+            if self._camera_available:
+                self._message = "Monitoring started"
+            else:
+                self._message = "Monitoring started in no-camera mode"
+                self._latest_frame = self._make_placeholder_frame("Camera not available (Cloud mode)")
             self._running = True
 
             # Hardware initialization disabled - no ESP32 connection
@@ -172,6 +177,7 @@ class MonitoringService:
         self._detector = None
         hardware = self._hardware
         self._hardware = None
+        self._camera_available = False
 
         if capture is not None:
             capture.release()
@@ -212,8 +218,6 @@ class MonitoringService:
                 self._last_hardware_send_ts = timestamp
 
     def _run(self) -> None:
-        assert self._capture is not None
-        assert self._detector is not None
         assert self._eye_analyzer is not None
         assert self._head_pose_estimator is not None
         assert self._distraction_monitor is not None
@@ -223,12 +227,37 @@ class MonitoringService:
 
         try:
             while not self._stop_event.is_set():
+                if self._capture is None or self._detector is None:
+                    self._latest_face_detected = False
+                    self._latest_state = "NO_CAMERA"
+                    self._latest_risk_score = 0.0
+                    self._latest_fatigue_score = 0.0
+                    self._latest_distraction_score = 0.0
+                    self._latest_timestamp = time.time()
+                    self._message = "Camera not available (Cloud mode)"
+                    self._latest_frame = self._make_placeholder_frame("Camera not available (Cloud mode)")
+                    time.sleep(0.2)
+                    continue
+
                 ok, frame = self._capture.read()
                 if not ok:
-                    self._error = "Camera frame read failed"
-                    self._message = self._error
-                    self._latest_frame = self._make_placeholder_frame(self._error)
-                    break
+                    self._latest_face_detected = False
+                    self._latest_state = "NO_CAMERA"
+                    self._latest_risk_score = 0.0
+                    self._latest_fatigue_score = 0.0
+                    self._latest_distraction_score = 0.0
+                    self._latest_timestamp = time.time()
+                    self._message = "Camera not available (Cloud mode)"
+                    self._latest_frame = self._make_placeholder_frame("Camera not available (Cloud mode)")
+                    if self._capture is not None:
+                        self._capture.release()
+                    self._capture = None
+                    if self._detector is not None:
+                        self._detector.close()
+                    self._detector = None
+                    self._camera_available = False
+                    time.sleep(0.2)
+                    continue
 
                 timestamp = time.time()
                 detection = self._detector.process(frame)
