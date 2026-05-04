@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 from config import CONFIG
+from backend.sources import get_video_source, VideoSource
 from modules.alert import AlertManager
 from modules.distraction import DistractionMonitor
 from modules.eye_analysis import EyeAnalyzer
@@ -29,7 +30,7 @@ class MonitoringService:
         self._message = "System not started"
         self._error: Optional[str] = None
 
-        self._capture: Optional[cv2.VideoCapture] = None
+        self._video_source: Optional[VideoSource] = None
         self._detector: Optional[FaceLandmarkDetector] = None
         self._eye_analyzer: Optional[EyeAnalyzer] = None
         self._head_pose_estimator: Optional[HeadPoseEstimator] = None
@@ -74,30 +75,77 @@ class MonitoringService:
             self._message = "Starting monitoring"
             self._stop_event.clear()
 
-            capture = cv2.VideoCapture(CONFIG.camera_index)
-            capture.set(cv2.CAP_PROP_FRAME_WIDTH, CONFIG.frame_width)
-            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, CONFIG.frame_height)
+            # Create video source based on camera mode
+            video_source = None
+            camera_mode = CONFIG.camera_mode.lower()
 
-            self._capture = None
+            if camera_mode == "local":
+                video_source = get_video_source(
+                    "local",
+                    camera_index=CONFIG.camera_index,
+                    frame_width=CONFIG.frame_width,
+                    frame_height=CONFIG.frame_height,
+                )
+            elif camera_mode == "file":
+                if CONFIG.video_file_path:
+                    video_source = get_video_source(
+                        "file",
+                        file_path=CONFIG.video_file_path,
+                        frame_width=CONFIG.frame_width,
+                        frame_height=CONFIG.frame_height,
+                    )
+                else:
+                    self._error = "Video file path not configured (VIDEO_FILE_PATH env var)"
+                    self._message = "Cannot start in file mode: path not set"
+                    self._latest_frame = self._make_placeholder_frame(self._message)
+            elif camera_mode == "rtsp":
+                if CONFIG.stream_url:
+                    video_source = get_video_source(
+                        "rtsp",
+                        stream_url=CONFIG.stream_url,
+                        frame_width=CONFIG.frame_width,
+                        frame_height=CONFIG.frame_height,
+                    )
+                else:
+                    self._error = "Stream URL not configured (STREAM_URL env var)"
+                    self._message = "Cannot start in RTSP mode: URL not set"
+                    self._latest_frame = self._make_placeholder_frame(self._message)
+            elif camera_mode == "mock":
+                video_source = get_video_source(
+                    "mock",
+                    frame_width=CONFIG.frame_width,
+                    frame_height=CONFIG.frame_height,
+                )
+            else:
+                self._error = f"Unknown camera mode: {camera_mode}"
+                self._message = f"Invalid camera mode: {camera_mode}"
+                self._latest_frame = self._make_placeholder_frame(self._message)
+
+            # Try to open the video source
+            self._video_source = None
             self._detector = None
             self._camera_available = False
-            if capture.isOpened():
+
+            if video_source and video_source.open():
                 try:
                     detector = FaceLandmarkDetector(
                         min_detection_confidence=CONFIG.min_detection_confidence,
                         min_tracking_confidence=CONFIG.min_tracking_confidence,
                     )
-                    self._capture = capture
+                    self._video_source = video_source
                     self._detector = detector
                     self._camera_available = True
                 except Exception as exc:
-                    logger.exception("Face detector init failed, switching to no-camera mode")
-                    capture.release()
+                    logger.exception("Face detector init failed")
+                    video_source.close()
                     self._error = f"Face detector init failed: {exc}"
+                    self._message = "Face detector initialization failed"
+                    self._latest_frame = self._make_placeholder_frame(self._message)
             else:
-                capture.release()
-                self._message = f"Camera not available (Cloud mode): index {CONFIG.camera_index}"
-                self._latest_frame = self._make_placeholder_frame("Camera not available (Cloud mode)")
+                if video_source:
+                    video_source.close()
+                self._message = f"Camera not available (using {camera_mode} mode)"
+                self._latest_frame = self._make_placeholder_frame(self._message)
 
             self._eye_analyzer = EyeAnalyzer()
             self._head_pose_estimator = HeadPoseEstimator()
@@ -122,27 +170,14 @@ class MonitoringService:
             self._latest_head_pose = None
             self._latest_fatigue = None
             self._latest_distraction = None
-            if self._camera_available:
-                self._message = "Monitoring started"
-            else:
-                self._message = "Monitoring started in no-camera mode"
-                self._latest_frame = self._make_placeholder_frame("Camera not available (Cloud mode)")
-            self._running = True
 
-            # Hardware initialization disabled - no ESP32 connection
-            # if CONFIG.enable_hardware:
-            #     hardware = HardwareInterface(
-            #         port=CONFIG.serial_port,
-            #         baudrate=CONFIG.serial_baudrate,
-            #     )
-            #     if hardware.connect():
-            #         hardware.send_alert(CONFIG.hardware_default_state)
-            #         self._previous_state = CONFIG.hardware_default_state
-            #         self._last_hardware_send_ts = time.time()
-            #         self._hardware = hardware
-            #     else:
-            #         self._hardware = None
-            #         self._message = "Monitoring started without hardware"
+            if self._camera_available:
+                self._message = f"Monitoring started in {camera_mode} mode"
+            else:
+                self._message = f"Monitoring started in {camera_mode} mode (no camera)"
+                self._latest_frame = self._make_placeholder_frame(self._message)
+
+            self._running = True
 
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
@@ -171,16 +206,16 @@ class MonitoringService:
         return True
 
     def _cleanup_resources(self) -> None:
-        capture = self._capture
-        self._capture = None
+        video_source = self._video_source
+        self._video_source = None
         detector = self._detector
         self._detector = None
         hardware = self._hardware
         self._hardware = None
         self._camera_available = False
 
-        if capture is not None:
-            capture.release()
+        if video_source is not None:
+            video_source.close()
         if detector is not None:
             detector.close()
         if hardware is not None:
@@ -227,31 +262,31 @@ class MonitoringService:
 
         try:
             while not self._stop_event.is_set():
-                if self._capture is None or self._detector is None:
+                if self._video_source is None or self._detector is None:
                     self._latest_face_detected = False
                     self._latest_state = "NO_CAMERA"
                     self._latest_risk_score = 0.0
                     self._latest_fatigue_score = 0.0
                     self._latest_distraction_score = 0.0
                     self._latest_timestamp = time.time()
-                    self._message = "Camera not available (Cloud mode)"
-                    self._latest_frame = self._make_placeholder_frame("Camera not available (Cloud mode)")
+                    self._message = "Camera/source not available"
+                    self._latest_frame = self._make_placeholder_frame("Camera/source not available")
                     time.sleep(0.2)
                     continue
 
-                ok, frame = self._capture.read()
-                if not ok:
+                ok, frame = self._video_source.read()
+                if not ok or frame is None:
                     self._latest_face_detected = False
                     self._latest_state = "NO_CAMERA"
                     self._latest_risk_score = 0.0
                     self._latest_fatigue_score = 0.0
                     self._latest_distraction_score = 0.0
                     self._latest_timestamp = time.time()
-                    self._message = "Camera not available (Cloud mode)"
-                    self._latest_frame = self._make_placeholder_frame("Camera not available (Cloud mode)")
-                    if self._capture is not None:
-                        self._capture.release()
-                    self._capture = None
+                    self._message = "Failed to read from source"
+                    self._latest_frame = self._make_placeholder_frame("Failed to read from source")
+                    if self._video_source is not None:
+                        self._video_source.close()
+                    self._video_source = None
                     if self._detector is not None:
                         self._detector.close()
                     self._detector = None

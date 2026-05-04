@@ -5,12 +5,83 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Driver Safety Monitoring System</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .mode-selector {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        .mode-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .mode-btn {
+            padding: 8px 16px;
+            border: 2px solid #ccc;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mode-btn:hover {
+            border-color: #007bff;
+            background: #f0f8ff;
+        }
+        .mode-btn.active {
+            background: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+        .file-upload {
+            margin-top: 10px;
+        }
+        .stream-config {
+            margin-top: 10px;
+        }
+        input[type="text"], input[type="file"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
 </head>
 <body>
     <main class="container">
         <section class="panel">
             <h1>Driver Safety Monitoring System</h1>
-            <p class="muted">Minimal FastAPI dashboard for live monitoring.</p>
+            <p class="muted">Multi-mode FastAPI dashboard for local and cloud environments.</p>
+
+            <!-- Mode Selection -->
+            <div class="mode-selector">
+                <h3>Input Source Mode</h3>
+                <div class="mode-buttons">
+                    <button class="mode-btn active" id="modeLocal" data-mode="local">Local Camera</button>
+                    <button class="mode-btn" id="modeFile" data-mode="file">Upload Video</button>
+                    <button class="mode-btn" id="modeRtsp" data-mode="rtsp">Live Stream</button>
+                    <button class="mode-btn" id="modeMock" data-mode="mock">Demo Mode</button>
+                </div>
+
+                <!-- File Upload Panel -->
+                <div class="file-upload hidden" id="fileUploadPanel">
+                    <label>Select video file:</label>
+                    <input type="file" id="videoFile" accept="video/*">
+                    <button id="uploadBtn" type="button">Upload & Process</button>
+                </div>
+
+                <!-- Stream Config Panel -->
+                <div class="stream-config hidden" id="streamConfigPanel">
+                    <label>RTSP/Stream URL:</label>
+                    <input type="text" id="streamUrl" placeholder="rtsp://camera-ip:554/stream">
+                    <button id="connectStreamBtn" type="button">Connect</button>
+                </div>
+            </div>
 
             <div class="actions">
                 <button id="startBtn" type="button">Start Monitoring</button>
@@ -43,6 +114,114 @@
     </main>
 
     <script>
+        let currentMode = 'local';
+
+        // Mode selection handlers
+        document.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mode = btn.dataset.mode;
+                switchMode(mode);
+            });
+        });
+
+        function switchMode(mode) {
+            currentMode = mode;
+            
+            // Update button states
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById('mode' + mode.charAt(0).toUpperCase() + mode.slice(1)).classList.add('active');
+
+            // Show/hide panels
+            document.getElementById('fileUploadPanel').classList.toggle('hidden', mode !== 'file');
+            document.getElementById('streamConfigPanel').classList.toggle('hidden', mode !== 'rtsp');
+
+            // Configure backend
+            if (mode === 'local') {
+                configureMode('local');
+            } else if (mode === 'mock') {
+                configureMode('mock');
+            }
+        }
+
+        async function configureMode(mode) {
+            try {
+                const response = await fetch(`/configure/${mode}`, { method: 'POST' });
+                const data = await response.json();
+                document.getElementById('message').textContent = data.message || '';
+                await refreshStatus();
+            } catch (error) {
+                document.getElementById('error').textContent = 'Failed to configure mode: ' + error.message;
+                document.getElementById('error').style.display = 'block';
+            }
+        }
+
+        // File upload
+        document.getElementById('uploadBtn').addEventListener('click', async () => {
+            const fileInput = document.getElementById('videoFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a video file');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/configure/file', {
+                    method: 'POST',
+                    body: formData,
+                });
+                const data = await response.json();
+                if (data.status === 'success') {
+                    document.getElementById('message').textContent = data.message;
+                    document.getElementById('error').style.display = 'none';
+                } else {
+                    document.getElementById('error').textContent = data.message;
+                    document.getElementById('error').style.display = 'block';
+                }
+                await refreshStatus();
+            } catch (error) {
+                document.getElementById('error').textContent = 'Upload failed: ' + error.message;
+                document.getElementById('error').style.display = 'block';
+            }
+        });
+
+        // Stream configuration
+        document.getElementById('connectStreamBtn').addEventListener('click', async () => {
+            const url = document.getElementById('streamUrl').value;
+            
+            if (!url) {
+                alert('Please enter a stream URL');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('stream_url', url);
+
+            try {
+                const response = await fetch('/configure/stream', {
+                    method: 'POST',
+                    body: formData,
+                });
+                const data = await response.json();
+                if (data.status === 'success') {
+                    document.getElementById('message').textContent = data.message;
+                    document.getElementById('error').style.display = 'none';
+                } else {
+                    document.getElementById('error').textContent = data.message;
+                    document.getElementById('error').style.display = 'block';
+                }
+                await refreshStatus();
+            } catch (error) {
+                document.getElementById('error').textContent = 'Configuration failed: ' + error.message;
+                document.getElementById('error').style.display = 'block';
+            }
+        });
+
         async function refreshStatus() {
             try {
                 const response = await fetch('/status');

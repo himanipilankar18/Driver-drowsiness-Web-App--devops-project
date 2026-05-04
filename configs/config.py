@@ -1,11 +1,22 @@
+import os
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class SystemConfig:
+    # Camera mode: "local", "file", "rtsp", "mock"
+    # Can be overridden via CAMERA_MODE env variable
+    camera_mode: str = os.getenv("CAMERA_MODE", "local")
+
+    # Local camera settings
     camera_index: int = 0
     frame_width: int = 1280
     frame_height: int = 720
+
+    # Cloud mode settings
+    video_file_path: str = ""  # Path to video file for "file" mode
+    stream_url: str = ""  # RTSP/stream URL for "rtsp" mode
+
     min_detection_confidence: float = 0.5
     min_tracking_confidence: float = 0.5
 
