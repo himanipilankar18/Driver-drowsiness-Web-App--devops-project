@@ -8,6 +8,12 @@ from backend.sources.video_source import (
     VideoSource,
     get_video_source,
 )
+from backend.sources.browser_camera import (
+    BrowserCameraReceiver,
+    BrowserCameraAdapter,
+    get_global_receiver,
+    reset_global_receiver,
+)
 
 __all__ = [
     "VideoSource",
@@ -16,4 +22,8 @@ __all__ = [
     "RTSPStreamSource",
     "MockSource",
     "get_video_source",
+    "BrowserCameraReceiver",
+    "BrowserCameraAdapter",
+    "get_global_receiver",
+    "reset_global_receiver",
 ]

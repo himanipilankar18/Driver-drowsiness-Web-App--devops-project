@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 
 from config import CONFIG
-from backend.sources import get_video_source, VideoSource
+from backend.sources import get_video_source, VideoSource, BrowserCameraAdapter, get_global_receiver
 from modules.alert import AlertManager
 from modules.distraction import DistractionMonitor
 from modules.eye_analysis import EyeAnalyzer
@@ -116,6 +116,10 @@ class MonitoringService:
                     frame_width=CONFIG.frame_width,
                     frame_height=CONFIG.frame_height,
                 )
+            elif camera_mode == "browser":
+                # Browser-based camera mode - use global receiver
+                receiver = get_global_receiver()
+                video_source = BrowserCameraAdapter(receiver)
             else:
                 self._error = f"Unknown camera mode: {camera_mode}"
                 self._message = f"Invalid camera mode: {camera_mode}"

@@ -65,6 +65,7 @@
                     <button class="mode-btn active" id="modeLocal" data-mode="local">Local Camera</button>
                     <button class="mode-btn" id="modeFile" data-mode="file">Upload Video</button>
                     <button class="mode-btn" id="modeRtsp" data-mode="rtsp">Live Stream</button>
+                    <button class="mode-btn" id="modeBrowser" data-mode="browser">Browser Camera</button>
                     <button class="mode-btn" id="modeMock" data-mode="mock">Demo Mode</button>
                 </div>
 
@@ -80,6 +81,16 @@
                     <label>RTSP/Stream URL:</label>
                     <input type="text" id="streamUrl" placeholder="rtsp://camera-ip:554/stream">
                     <button id="connectStreamBtn" type="button">Connect</button>
+                </div>
+
+                <!-- Browser Camera Panel -->
+                <div class="browser-camera-panel hidden" id="browserCameraPanel">
+                    <label>Browser Camera (from your device):</label>
+                    <div style="margin-top: 10px;">
+                        <button id="startCameraBtn" type="button" style="background-color: #28a745; color: white;">Start Browser Camera</button>
+                        <button id="stopCameraBtn" type="button" style="background-color: #dc3545; color: white; display: none;">Stop Browser Camera</button>
+                    </div>
+                    <div id="cameraStats" style="margin-top: 10px; font-size: 12px; color: #666;"></div>
                 </div>
             </div>
 
@@ -113,8 +124,10 @@
         </section>
     </main>
 
+    <script src="/static/browser-camera.js"></script>
     <script>
         let currentMode = 'local';
+        let browserCamera = null;
 
         // Mode selection handlers
         document.querySelectorAll('.mode-btn').forEach(btn => {
@@ -136,12 +149,39 @@
             // Show/hide panels
             document.getElementById('fileUploadPanel').classList.toggle('hidden', mode !== 'file');
             document.getElementById('streamConfigPanel').classList.toggle('hidden', mode !== 'rtsp');
+            document.getElementById('browserCameraPanel').classList.toggle('hidden', mode !== 'browser');
 
-            // Configure backend
-            if (mode === 'local') {
-                configureMode('local');
-            } else if (mode === 'mock') {
-                configureMode('mock');
+            // Handle browser camera mode
+            if (mode === 'browser') {
+                // Stop if running
+                if (browserCamera && browserCamera.state.isCapturing) {
+                    browserCamera.stop();
+                }
+                configureBrowserMode();
+            } else {
+                // Stop browser camera if was running
+                if (browserCamera && browserCamera.state.isCapturing) {
+                    browserCamera.stop();
+                }
+
+                // Configure backend for other modes
+                if (mode === 'local') {
+                    configureMode('local');
+                } else if (mode === 'mock') {
+                    configureMode('mock');
+                }
+            }
+        }
+
+        async function configureBrowserMode() {
+            try {
+                const response = await fetch('/configure/browser', { method: 'POST' });
+                const data = await response.json();
+                document.getElementById('message').textContent = data.message || '';
+                await refreshStatus();
+            } catch (error) {
+                document.getElementById('error').textContent = 'Failed to configure browser mode: ' + error.message;
+                document.getElementById('error').style.display = 'block';
             }
         }
 
@@ -154,6 +194,91 @@
             } catch (error) {
                 document.getElementById('error').textContent = 'Failed to configure mode: ' + error.message;
                 document.getElementById('error').style.display = 'block';
+            }
+        }
+
+        // Browser camera start button
+        document.getElementById('startCameraBtn').addEventListener('click', async () => {
+            try {
+                // Start monitoring on backend
+                await fetch('/start', { method: 'POST' });
+
+                // Initialize browser camera
+                if (!browserCamera) {
+                    browserCamera = new BrowserCameraCapture({
+                        frameRate: 12,
+                        quality: 0.85,
+                        useWebSocket: true,
+                        onAnalysisResult: (result) => {
+                            updateMetricsFromBrowserCamera(result);
+                        },
+                        onError: (error) => {
+                            document.getElementById('error').textContent = error;
+                            document.getElementById('error').style.display = 'block';
+                        },
+                    });
+
+                    browserCamera.attachStatsElement(
+                        document.getElementById('cameraStats')
+                    );
+                }
+
+                // Start capturing
+                await browserCamera.start();
+
+                // Update UI
+                document.getElementById('startCameraBtn').style.display = 'none';
+                document.getElementById('stopCameraBtn').style.display = 'inline-block';
+                document.getElementById('message').textContent = 'Browser camera capturing...';
+                document.getElementById('error').style.display = 'none';
+
+                await refreshStatus();
+            } catch (error) {
+                document.getElementById('error').textContent = 'Failed to start browser camera: ' + error.message;
+                document.getElementById('error').style.display = 'block';
+            }
+        });
+
+        // Browser camera stop button
+        document.getElementById('stopCameraBtn').addEventListener('click', async () => {
+            try {
+                // Stop browser camera
+                if (browserCamera) {
+                    browserCamera.stop();
+                }
+
+                // Stop backend monitoring
+                await fetch('/stop', { method: 'POST' });
+
+                // Update UI
+                document.getElementById('startCameraBtn').style.display = 'inline-block';
+                document.getElementById('stopCameraBtn').style.display = 'none';
+                document.getElementById('message').textContent = 'Browser camera stopped';
+                document.getElementById('cameraStats').textContent = '';
+
+                await refreshStatus();
+            } catch (error) {
+                document.getElementById('error').textContent = 'Failed to stop browser camera: ' + error.message;
+                document.getElementById('error').style.display = 'block';
+            }
+        });
+
+        function updateMetricsFromBrowserCamera(result) {
+            // Update metrics from WebSocket/HTTP response
+            if (result.state) {
+                document.getElementById('state').textContent = result.state;
+            }
+            if (result.fatigue_score !== undefined) {
+                document.getElementById('fatigue_score').textContent = 
+                    result.fatigue_score.toFixed(2);
+            }
+            if (result.distraction_score !== undefined) {
+                document.getElementById('distraction_score').textContent = 
+                    result.distraction_score.toFixed(2);
+            }
+            if (result.face_detected !== undefined) {
+                document.getElementById('face_detected').textContent = 
+                    result.face_detected ? 'Yes' : 'No';
             }
         }
 

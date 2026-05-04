@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class SystemConfig:
-    # Camera mode: "local", "file", "rtsp", "mock"
+    # Camera mode: "local", "file", "rtsp", "mock", "browser"
     # Can be overridden via CAMERA_MODE env variable
     camera_mode: str = os.getenv("CAMERA_MODE", "local")
 

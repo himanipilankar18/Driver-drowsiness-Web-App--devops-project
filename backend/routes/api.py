@@ -215,12 +215,225 @@ def get_available_modes(request: Request):
     from config import CONFIG
     
     return JSONResponse({
-        "available_modes": ["local", "file", "rtsp", "mock"],
+        "available_modes": ["local", "file", "rtsp", "browser", "mock"],
         "current_mode": CONFIG.camera_mode,
         "modes_description": {
             "local": "Local webcam via cv2.VideoCapture",
             "file": "Video file upload and playback",
             "rtsp": "RTSP or HTTP stream from IP camera",
+            "browser": "Browser-based webcam via getUserMedia",
             "mock": "Mock/demo mode with simulated frames",
         },
     })
+
+
+@router.post("/configure/browser")
+def configure_browser_mode(request: Request):
+    """
+    Configure browser-based camera mode.
+    Stops current monitoring and switches to browser camera.
+    
+    Usage:
+    - Start monitoring in browser mode
+    - Send frames via /frame/upload endpoint
+    """
+    try:
+        service = request.app.state.monitoring_service
+        
+        # Stop current monitoring
+        if service.is_running():
+            service.stop()
+        
+        logger.info("Switched to browser camera mode")
+        
+        # Update config for browser mode
+        os.environ["CAMERA_MODE"] = "browser"
+        
+        # Reload config
+        import importlib
+        import config as config_module
+        importlib.reload(config_module)
+        
+        # Reset and open the global receiver
+        from backend.sources import get_global_receiver
+        receiver = get_global_receiver()
+        receiver.open()
+        
+        return JSONResponse({
+            "status": "success",
+            "message": "Switched to browser camera mode. Start sending frames via /frame/upload",
+            "camera_mode": "browser",
+        })
+    except Exception as e:
+        logger.error(f"Browser mode configuration error: {e}")
+        return JSONResponse(
+            {"status": "error", "message": str(e)},
+            status_code=400,
+        )
+
+
+@router.post("/frame/upload")
+async def upload_frame(request: Request, image: UploadFile = File(...)):
+    """
+    Upload a video frame from browser camera.
+    
+    Accepts JPEG image file.
+    Returns analysis results: fatigue_score, distraction_score, face_detected, state
+    
+    Usage:
+    - POST image file as multipart form
+    - Response contains current monitoring status
+    """
+    try:
+        from backend.sources import get_global_receiver
+        
+        receiver = get_global_receiver()
+        
+        if not receiver.is_open():
+            return JSONResponse(
+                {"status": "error", "message": "Browser receiver not active"},
+                status_code=400,
+            )
+        
+        # Read image file
+        frame_bytes = await image.read()
+        
+        if len(frame_bytes) == 0:
+            return JSONResponse(
+                {"status": "error", "message": "Empty frame"},
+                status_code=400,
+            )
+        
+        # Limit frame size (10MB max)
+        if len(frame_bytes) > 10 * 1024 * 1024:
+            return JSONResponse(
+                {"status": "error", "message": "Frame too large (max 10MB)"},
+                status_code=413,
+            )
+        
+        # Submit frame to receiver
+        success = receiver.submit_frame_bytes(frame_bytes)
+        
+        if not success:
+            return JSONResponse(
+                {"status": "error", "message": "Failed to process frame"},
+                status_code=400,
+            )
+        
+        # Get current monitoring status
+        service = request.app.state.monitoring_service
+        status_data = service.status()
+        
+        return JSONResponse({
+            "status": "success",
+            "message": "Frame received",
+            "frame_count": receiver.get_stats()["frames_received"],
+            "analysis": {
+                "state": status_data.get("state"),
+                "fatigue_score": status_data.get("fatigue_score"),
+                "distraction_score": status_data.get("distraction_score"),
+                "face_detected": status_data.get("face_detected"),
+                "monitoring": status_data.get("monitoring"),
+            },
+        })
+    except Exception as e:
+        logger.error(f"Frame upload error: {e}")
+        return JSONResponse(
+            {"status": "error", "message": str(e)},
+            status_code=400,
+        )
+
+
+@router.post("/frame/base64")
+async def upload_frame_base64(request: Request):
+    """
+    Upload a video frame from browser camera as Base64.
+    
+    POST JSON body:
+    {
+        "frame": "base64_encoded_jpeg_data"
+    }
+    
+    Returns analysis results: fatigue_score, distraction_score, face_detected, state
+    """
+    try:
+        from backend.sources import get_global_receiver
+        import json
+        
+        receiver = get_global_receiver()
+        
+        if not receiver.is_open():
+            return JSONResponse(
+                {"status": "error", "message": "Browser receiver not active"},
+                status_code=400,
+            )
+        
+        # Parse request body
+        body = await request.json()
+        frame_base64 = body.get("frame")
+        
+        if not frame_base64:
+            return JSONResponse(
+                {"status": "error", "message": "No frame data provided"},
+                status_code=400,
+            )
+        
+        # Check size limit (Base64 string max 15MB)
+        if len(frame_base64) > 15 * 1024 * 1024:
+            return JSONResponse(
+                {"status": "error", "message": "Frame too large"},
+                status_code=413,
+            )
+        
+        # Submit frame to receiver
+        success = receiver.submit_frame_base64(frame_base64)
+        
+        if not success:
+            return JSONResponse(
+                {"status": "error", "message": "Failed to process frame"},
+                status_code=400,
+            )
+        
+        # Get current monitoring status
+        service = request.app.state.monitoring_service
+        status_data = service.status()
+        
+        return JSONResponse({
+            "status": "success",
+            "message": "Frame received",
+            "frame_count": receiver.get_stats()["frames_received"],
+            "analysis": {
+                "state": status_data.get("state"),
+                "fatigue_score": status_data.get("fatigue_score"),
+                "distraction_score": status_data.get("distraction_score"),
+                "face_detected": status_data.get("face_detected"),
+                "monitoring": status_data.get("monitoring"),
+            },
+        })
+    except Exception as e:
+        logger.error(f"Frame upload error: {e}")
+        return JSONResponse(
+            {"status": "error", "message": str(e)},
+            status_code=400,
+        )
+
+
+@router.get("/frame/stats")
+def get_frame_stats(request: Request):
+    """Get statistics about browser camera frame reception."""
+    try:
+        from backend.sources import get_global_receiver
+        
+        receiver = get_global_receiver()
+        stats = receiver.get_stats()
+        
+        return JSONResponse({
+            "status": "success",
+            "frame_stats": stats,
+        })
+    except Exception as e:
+        logger.error(f"Error getting frame stats: {e}")
+        return JSONResponse(
+            {"status": "error", "message": str(e)},
+            status_code=400,
+        )
